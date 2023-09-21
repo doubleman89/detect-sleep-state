@@ -14,13 +14,14 @@ class Serie:
         "wakeup":4
     }
 
-    def __init__(self,serie_id,serie_path,serie_events):
+    def __init__(self,serie_id,serie_path,serie_events,augmentation =False):
         self.serie_id = serie_id
         self.serie = pd.read_csv(serie_path)
         self.serie_length = len(self.serie)
         self.serie_events = serie_events
         self.mask = None 
         self.mask_slices = None 
+        self.augmentation = augmentation
 
 
     def encode_events(self,df):
@@ -136,7 +137,12 @@ class Serie:
         # create empty slices array
         slices = np.zeros(shape=(slice_len,time_window,slice_columns))
 
-        for i in range((len(self.mask)//time_window)):
+        slices_num = (len(self.mask)//time_window)
+        # aug_offsets = 0
+        # if self.augmentation:
+        #     aug_offsets = np.random.random_integers(low=-time_window+1,high=time_window-1,size=slices_num)
+
+        for i in range(slices_num):
             slice = self.mask[(self.mask['step'] < time_window+time_window*i) & (self.mask['step']  >= time_window*i) ]    
             new_slice  =slice.drop(columns =drop_columns)
             slices[i,:,:] = new_slice.to_numpy()
@@ -223,6 +229,9 @@ class Dataset:
     def split_dataset(self, train = 0.8, dev = 0.0, test = 0.2):
         X = self.ds[...,:-1]
         y = self.ds[...,-1]
+        # add additional axis to match the shapes 
+        if len(X.shape) != len(y.shape):
+            y=y[...,np.newaxis]
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=dev+test)
 
         if dev != 0.0 and test != 0.0:
