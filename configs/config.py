@@ -8,7 +8,7 @@ CFG = {
       "data": {
         "series_format":   "csv",
         "record_interval": 5,  # every step recorded in interval of x [s]
-        "slice_length" :12, # in [h]
+        "slice_length" :6, # in [h]
         "valid_range_ifNan" : 4, # range of time to consider as valid if Nan was detected (before/after) in[h]
         "clean_data" : True,
         "normalize" : True,

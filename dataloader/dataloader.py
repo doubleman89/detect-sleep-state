@@ -4,24 +4,53 @@ from pathlib import PurePosixPath
 from sklearn.model_selection import train_test_split
 
 
+
 class Serie:
 
     encode_list = {
-        "unknown":0,
-        "awake":1,
-        "onset":2,
-        "sleep":3,
-        "wakeup":4
+        "unknown":-1,
+        "awake":0,
+        "onset":1,
+        "sleep":1,
+        "wakeup":0
     }
-
-    def __init__(self,serie_id,serie_path,serie_events,augmentation =False):
+    def __init__(self,serie_id,serie_path,serie_events=None,augmentation =False):
         self.serie_id = serie_id
         self.serie = pd.read_csv(serie_path)
         self.serie_length = len(self.serie)
         self.serie_events = serie_events
         self.mask = None 
-        self.mask_slices = None 
+        self.slices = None 
         self.augmentation = augmentation
+
+
+    def create_slices(self, time_window, drop_columns,serie):
+        # calculate slice lenght
+        slice_len = np.int64(len(serie)/time_window)
+        # calculate slice columns after dropping
+        slice_columns = len(serie.columns) - len(drop_columns)
+        # create empty slices array
+        slices = np.zeros(shape=(slice_len,time_window,slice_columns))
+
+        slices_num = (len(serie)//time_window)
+        # aug_offsets = 0
+        # if self.augmentation:
+        #     aug_offsets = np.random.random_integers(low=-time_window+1,high=time_window-1,size=slices_num)
+
+        for i in range(slices_num):
+            slice = serie[(serie['step'] < time_window+time_window*i) & (serie['step']  >= time_window*i) ]    
+            new_slice  =slice.drop(columns =drop_columns)
+            slices[i,:,:] = new_slice.to_numpy()
+
+        self.slices = slices
+        
+
+class TrainSerie(Serie):
+
+
+
+    def __init__(self, serie_id, serie_path, serie_events, augmentation=False):
+        super().__init__(serie_id, serie_path, serie_events, augmentation)
 
 
     def encode_events(self,df):
@@ -47,7 +76,7 @@ class Serie:
         encoded_list = self.__class__.encode_list
         encoded_events = self.encode_events(self.serie_events)
         # create empty array for events after segmentation
-        step_seg_list = np.zeros(shape =(self.serie_length,),dtype= int)
+        step_seg_list = np.full(shape =(self.serie_length,),fill_value=encoded_list["unknown"],dtype= np.int64)
         last_step =  -1
         last_timestamp_na = False
         last_event = -1
@@ -56,7 +85,7 @@ class Serie:
         for idx, *row in encoded_events.itertuples():
             event = row[2]
             try:
-                step = int(row[3])
+                step = np.int64(row[3])
             except:
                 step = row[3]
             timestamp = row[4]
@@ -124,30 +153,86 @@ class Serie:
             #update last values to next iteratation
             last_step = step
             last_event = event 
-        
+
         # create mask
         self.mask = self.serie.copy()
         self.mask["event"] = step_seg_list
 
     def create_slices(self, time_window, drop_columns):
-        # calculate slice lenght
-        slice_len = int(len(self.mask)/time_window)
-        # calculate slice columns after dropping
-        slice_columns = len(self.mask.columns) - len(drop_columns)
-        # create empty slices array
-        slices = np.zeros(shape=(slice_len,time_window,slice_columns))
+        super().create_slices(time_window,drop_columns,self.mask)
 
-        slices_num = (len(self.mask)//time_window)
-        # aug_offsets = 0
-        # if self.augmentation:
-        #     aug_offsets = np.random.random_integers(low=-time_window+1,high=time_window-1,size=slices_num)
+    
+    def get_correct_slices(self):
+        # correct_slices = self.mask_slices.copy()
+        # deleted_indexes = []
+        # for i in range(correct_slices.shape[0]):
+        #     if self.__class__.encode_list["unknown"] in  correct_slices[i,1]:
+        #         deleted_indexes.append[i]
+        # return correct_slices.delete(deleted_indexes,axis = 0)
+        slices_len = self.slices.shape[0]
+        slices_with_zero = np.zeros(shape = (slices_len,),dtype=bool)
+        for i in range(slices_len):
+            slices_with_zero[i] = 1-(self.__class__.encode_list["unknown"] in self.slices[i,...,-1])
+        return self.slices[slices_with_zero]
+        
 
-        for i in range(slices_num):
-            slice = self.mask[(self.mask['step'] < time_window+time_window*i) & (self.mask['step']  >= time_window*i) ]    
-            new_slice  =slice.drop(columns =drop_columns)
-            slices[i,:,:] = new_slice.to_numpy()
 
-        self.mask_slices = slices
+class TestSerie(Serie):
+
+    def __init__(self, serie_id, serie_path, serie_events=None, augmentation=False):
+        super().__init__(serie_id, serie_path, serie_events, augmentation)
+
+    def create_slices(self, time_window, drop_columns):
+        super().create_slices(time_window,drop_columns,self.serie)
+
+
+    def decode_events(self,df):
+        df_copy = df.copy()
+        decoded_list = {v: k for k, v in self.__class__.encode_list.items()}
+        df_copy["event"] = df_copy["event"].map(decoded_list)    
+        return df_copy
+
+    def create_events(self,step_seg_list):
+        """create df_events 
+        input:
+        step_seg_list - step segmentation list base on predicted values """
+        def detectChange(last_val,current_val):
+            return last_val !=current_val
+
+        # create empty dataframe
+        df_events = pd.DataFrame(columns=["series_id","step","event","score"])
+       
+        for i in range(len(step_seg_list.shape[0])):
+            event_val = step_seg_list[i,0]
+            event_score = step_seg_list[i,1]
+            if i == 0:
+                # do not detect anything during first step
+                continue
+            elif not detectChange(step_seg_list[i-1,0],event_val):
+                continue
+            df_events["series_id"] = self.serie_id
+            df_events["step"] = i
+            df_events["event"] = event_val
+            df_events["score"] = event_score
+        
+        # decode events 
+        df_events["event"] = self.decode_events(df_events["event"])
+        # save as serie events 
+        self.serie_events = df_events
+
+
+
+
+
+        
+            
+            
+
+
+
+    
+
+
                    
 
 class Series:
@@ -165,13 +250,15 @@ class Series:
         record_interval = self.data.record_interval #[s]
         # slice_length
         slice_length = self.data.slice_length
-        steps_window = int(slice_length*60*60/record_interval )
+        steps_window = np.int64(slice_length*60*60/record_interval )
         time_slices = [(steps_window*(i/4),steps_window*(4-i/4)) for i in range(1,4)]
-        valid_steps = int(self.data.valid_range_ifNan*60*60/record_interval )
+        valid_steps = np.int64(self.data.valid_range_ifNan*60*60/record_interval )
         
         return steps_window,valid_steps
 
     def get_serie_events(self,serie_id):
+        if self.df_events == None:
+            return None
         return self.df_events[self.df_events["series_id"]==serie_id]
     
     def createSerie(self,serie_id):
@@ -181,7 +268,7 @@ class Series:
             serie_filename = serie_id+"."+self.data.series_format
             serie_path = self.paths.train_series / serie_filename
             serie_events = self.get_serie_events(serie_id)
-            serie = Serie(serie_id,serie_path,serie_events)
+            serie = TrainSerie(serie_id,serie_path,serie_events)
             self.series[serie_id] = serie
             self.series_names.add(serie_id)
             return serie
@@ -198,25 +285,81 @@ class Series:
                 serie.create_segmentation_mask(self.valid_steps)
                 serie.create_slices(self.steps_window,["series_id","step","timestamp"])
 
+    def createSeriesEvents(self,events):
+        s
+
+
+class Test_Series:
+    def __init__(self,data,paths):
+        self.data = data
+        self.paths = paths
+        self.df_events = None
+        self.series_ids =  None
+        self.series = {}
+        self.series_names = set()   
+        self.steps_window, self.valid_steps = self.set_ranges()
+    
+    def set_ranges(self):
+        # every step is recorded within 5s 
+        record_interval = self.data.record_interval #[s]
+        # slice_length
+        slice_length = self.data.slice_length
+        steps_window = np.int64(slice_length*60*60/record_interval )
+        time_slices = [(steps_window*(i/4),steps_window*(4-i/4)) for i in range(1,4)]
+        valid_steps = np.int64(self.data.valid_range_ifNan*60*60/record_interval )
+        
+        return steps_window,valid_steps
+
+    def get_serie_events(self,serie_id):
+        if self.df_events == None:
+            return None
+        return self.df_events[self.df_events["series_id"]==serie_id]
+    
+    def createSerie(self,serie_id):
+            if serie_id in self.series_names:
+                ## TODO - place for logger warning
+                return self.series[serie_id]
+            serie_filename = serie_id+"."+self.data.series_format
+            serie_path = self.paths.test_series / serie_filename
+            serie_events = self.get_serie_events(serie_id)
+            serie = TestSerie(serie_id,serie_path)
+            self.series[serie_id] = serie
+            self.series_names.add(serie_id)
+            return serie
+
+    def createSeries(self):
+        # extract all series ids in test series dataset
+        p = self.paths.test_series.glob(f'*.{self.data.series_format}')
+        series_files = [PurePosixPath(x).stem for x in p if x.is_file()]
+        for serie_id in self.series_ids:   
+            if serie_id in series_files:
+                serie = self.createSerie(serie_id)
+                serie.create_slices(self.steps_window,["series_id","step","timestamp"])
+
 
 
             
             
 class Dataset:
-    def __init__(self, series) -> None:
+    epsilon = 0.000001 
+
+    def __init__(self, series, normalize = True) -> None:
         self.ds = self._create_dataset_from_slices(series)
+        self.normalize = normalize
         self.X_train = None
         self.y_train = None
         self.X_dev = None
         self.y_dev = None
         self.x_test = None
         self.y_test = None
+        self.mean = None
+        self.std = None 
 
     
     def _create_dataset_from_slices(self,series : Series):
         ds_from_slices = None
         for serie_id in series.series: 
-            ms = series.series[serie_id].mask_slices
+            ms = series.series[serie_id].get_correct_slices()
             if ds_from_slices is None:
                 ds_from_slices=ms
             else:
@@ -232,12 +375,26 @@ class Dataset:
         # add additional axis to match the shapes 
         if len(X.shape) != len(y.shape):
             y=y[...,np.newaxis]
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=dev+test)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, test_size=dev+test)          
 
         if dev != 0.0 and test != 0.0:
             self.X_dev, self.X_dev, self.y_train, self.y_test = train_test_split(self.X_test, self.y_test, test_size=test/(dev+test))
+
+        if self.normalize: 
+            self.X_train = self._fit_transform(self.X_train)
+            self.X_test = self._transform(self.X_test)
+            if self.X_dev is not None:
+                self.X_dev = self._transform(self.X_dev)
     
-     
+    def _fit_transform(self,x):
+        # normalize through all shapes except the last one
+        axis = tuple([i for i in range(len(x.shape)-1)])
+        self.mean = x.mean(axis=axis)
+        self.std = x.std(axis = axis)
+        return self._transform(x)
+    
+    def _transform(self,x):
+        return (x-self.mean)/(self.__class__.epsilon+self.std)
 
 def create_dataset_from_slices(series : Series):
     ds_from_slices = None
