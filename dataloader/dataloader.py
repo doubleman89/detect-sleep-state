@@ -14,6 +14,11 @@ class Serie:
         "sleep":1,
         "wakeup":0
     }
+
+    decode_list = {
+        "wakeup":0,
+        "onset":1
+    }
     def __init__(self,serie_id,serie_path,serie_events=None,augmentation =False):
         self.serie_id = serie_id
         self.serie = pd.read_csv(serie_path)
@@ -23,6 +28,11 @@ class Serie:
         self.slices = None 
         self.augmentation = augmentation
 
+    def decode_events(self,df):
+        df_copy = df.copy()
+        decoded_list = {v: k for k, v in self.__class__.decode_list.items()}
+        df_copy["event"] = df_copy["event"].map(decoded_list)    
+        return df_copy
 
     def create_slices(self, time_window, drop_columns,serie):
         # calculate slice lenght
@@ -58,11 +68,7 @@ class TrainSerie(Serie):
         df_copy["event"] = df_copy["event"].map(self.__class__.encode_list)    
         return df_copy
     
-    def decode_events(self,df):
-        df_copy = df.copy()
-        decoded_list = {v: k for k, v in self.__class__.encode_list.items()}
-        df_copy["event"] = df_copy["event"].map(decoded_list)    
-        return df_copy
+
 
     def create_segmentation_mask(self,valid_range):
         """
@@ -102,7 +108,16 @@ class TrainSerie(Serie):
                 if timestamp_na:
                     last_timestamp_na = True
                 else:
+                    min_range= step-valid_range
+                    max_range=step
+                    
+                    if event == encoded_list["wakeup"]:
+                        step_seg_list[min_range:max_range] = encoded_list["sleep"]
+                    elif event == encoded_list["onset"]:
+                        step_seg_list[min_range:max_range] = encoded_list["awake"]
+
                     step_seg_list[step] = event
+                    
                 last_step = step
                 last_event = event 
                 first_iter_completed = True
@@ -186,23 +201,21 @@ class TestSerie(Serie):
         super().create_slices(time_window,drop_columns,self.serie)
 
 
-    def decode_events(self,df):
-        df_copy = df.copy()
-        decoded_list = {v: k for k, v in self.__class__.encode_list.items()}
-        df_copy["event"] = df_copy["event"].map(decoded_list)    
-        return df_copy
-
-    def create_events(self,step_seg_list):
+    def create_events(self,step_seg_list : np.array):
         """create df_events 
         input:
-        step_seg_list - step segmentation list base on predicted values """
+        step_seg_list - numpy array:
+                 - column 1 - segmentation mask
+                 - column 2 - score  (predicited vaues )"""
         def detectChange(last_val,current_val):
+            if last_val == -1 or current_val == -1:
+                return False
+
             return last_val !=current_val
 
         # create empty dataframe
         df_events = pd.DataFrame(columns=["series_id","step","event","score"])
-       
-        for i in range(len(step_seg_list.shape[0])):
+        for i in range(step_seg_list.shape[0]):
             event_val = step_seg_list[i,0]
             event_score = step_seg_list[i,1]
             if i == 0:
@@ -210,30 +223,17 @@ class TestSerie(Serie):
                 continue
             elif not detectChange(step_seg_list[i-1,0],event_val):
                 continue
-            df_events["series_id"] = self.serie_id
-            df_events["step"] = i
-            df_events["event"] = event_val
-            df_events["score"] = event_score
+
+            df_events.loc[len(df_events.index)] = [self.serie_id,i,event_val,event_score]
         
         # decode events 
-        df_events["event"] = self.decode_events(df_events["event"])
+        df_events = self.decode_events(df_events)
         # save as serie events 
         self.serie_events = df_events
 
-
-
-
-
-        
-            
-            
-
-
-
-    
-
-
-                   
+        return self.serie_events 
+    def get_example(self):
+        return self.serie[["anglez","enmo"]].to_numpy()
 
 class Series:
     def __init__(self,data,paths):
@@ -257,8 +257,6 @@ class Series:
         return steps_window,valid_steps
 
     def get_serie_events(self,serie_id):
-        if self.df_events == None:
-            return None
         return self.df_events[self.df_events["series_id"]==serie_id]
     
     def createSerie(self,serie_id):
@@ -285,8 +283,6 @@ class Series:
                 serie.create_segmentation_mask(self.valid_steps)
                 serie.create_slices(self.steps_window,["series_id","step","timestamp"])
 
-    def createSeriesEvents(self,events):
-        s
 
 
 class Test_Series:
@@ -310,18 +306,12 @@ class Test_Series:
         
         return steps_window,valid_steps
 
-    def get_serie_events(self,serie_id):
-        if self.df_events == None:
-            return None
-        return self.df_events[self.df_events["series_id"]==serie_id]
-    
     def createSerie(self,serie_id):
             if serie_id in self.series_names:
                 ## TODO - place for logger warning
                 return self.series[serie_id]
             serie_filename = serie_id+"."+self.data.series_format
             serie_path = self.paths.test_series / serie_filename
-            serie_events = self.get_serie_events(serie_id)
             serie = TestSerie(serie_id,serie_path)
             self.series[serie_id] = serie
             self.series_names.add(serie_id)
@@ -331,10 +321,36 @@ class Test_Series:
         # extract all series ids in test series dataset
         p = self.paths.test_series.glob(f'*.{self.data.series_format}')
         series_files = [PurePosixPath(x).stem for x in p if x.is_file()]
-        for serie_id in self.series_ids:   
-            if serie_id in series_files:
-                serie = self.createSerie(serie_id)
-                serie.create_slices(self.steps_window,["series_id","step","timestamp"])
+        for serie_id in series_files:   
+            serie = self.createSerie(serie_id)
+            serie.create_slices(self.steps_window,["series_id","step","timestamp"])
+
+    def createSeriesEvents(self,events : dict):
+        """
+        input: 
+        events - dictionary with serie_id as key 
+                and values equal to numpy array:
+                 - column 1 - segmentation mask
+                 - column 2 - score   """
+        first_event = False
+        series_event = None
+        for serie_id in self.series.keys():
+            serie_event =self.series[serie_id].create_events(events[serie_id])
+            if first_event:
+                series_event = serie_event
+                first_event = True
+                continue
+            else:
+                series_event = pd.concat([series_event,serie_event])
+        
+        series_event["row_id"] = range(0,len(series_event))
+        self.df_events = series_event
+        return self.df_events
+    
+
+
+
+
 
 
 
