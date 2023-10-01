@@ -129,9 +129,7 @@ class Unet(tf.keras.Model):
             contractive_inputs.append(d[1])
         
         # remove the last contractive input from the bottom - not used 
-        print(len(contractive_inputs))
         contractive_inputs.pop()
-        print(len(contractive_inputs))
 
         for upblock in self.upsampling_blocks:
             contractive_input = contractive_inputs.pop()
