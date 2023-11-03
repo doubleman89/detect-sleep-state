@@ -174,8 +174,8 @@ class Serie:
 
         self.slices = slices
 
-
-    def create_events(self,y_pred :np.array):
+    @staticmethod
+    def create_events(serie,y_pred :np.array):
         """create df_events 
         input:
         y_pred - score  (predicited vaues )"""
@@ -188,10 +188,10 @@ class Serie:
         # create empty dataframe
         df_events = pd.DataFrame(columns=["series_id","step","event","score"])
         # unpad y_pred
-        if self.slice_pads is None:
+        if serie.slice_pads is None:
             y_pred_unpadded = y_pred
         else:
-            y_pred_unpadded = self._unpad(y_pred,self.slice_pads)
+            y_pred_unpadded = serie._unpad(y_pred,serie.slice_pads)
         # create step seg list
         #         - events - segmentation mask
         #         -  score   - predicited vaues for chosen event
@@ -212,10 +212,10 @@ class Serie:
                 elif not detectChange(slice[i-1],event_val):
                     continue
 
-                df_events.loc[len(df_events.index)] = [self.serie_id,slices_num*i+i,event_val,event_score]
+                df_events.loc[len(df_events.index)] = [serie.serie_id,slices_num*i+i,event_val,event_score]
 
         # decode events 
-        df_events = self.decode_events(df_events)
+        df_events = serie.decode_events(df_events)
         # save as serie events 
         return df_events 
 
@@ -368,7 +368,7 @@ class TestSerie(Serie):
         super().create_slices(time_window,drop_columns,self.serie)
 
     def create_events(self, y_pred: np.array):
-        self.serie_events = super().create_events(y_pred)
+        self.serie_events = Serie.create_events(self,y_pred)
         return self.serie_events 
     
     def get_correct_slices(self):
@@ -449,7 +449,10 @@ class Train_Series(Series):
                 serie.create_segmentation_mask(self.valid_steps)
                 serie.create_slices(self.steps_window,["step"],limit_slices=self.data.limit_slices, limit_window=self.data.limit_window)
 
-
+    def create_events(self, y_pred: np.array):
+        """creates events for specific series data"""
+        serie_events = Serie.create_events(self,y_pred)
+        return serie_events 
 
 class Test_Series(Series):
     def __init__(self,data,paths):

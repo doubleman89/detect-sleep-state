@@ -11,7 +11,7 @@ CFG = {
         "slice_length" :8/36, # in [h]
         "valid_range_ifNan" : 1, # range of time to consider as valid if Nan was detected (before/after) in[h]
         "clean_data" : True,
-        "limit_slices" : True,
+        "limit_slices" : False,
         "limit_window": 5
     },
     "train": {
