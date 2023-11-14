@@ -8,11 +8,11 @@ CFG = {
       "data": {
         "series_format":   "csv",
         "record_interval": 5,  # every step recorded in interval of x [s]
-        "slice_length" :8/36, # in [h]
+        "slice_length" :75/360, # in [h] 8/36 previously = 160 steps
         "valid_range_ifNan" : 1, # range of time to consider as valid if Nan was detected (before/after) in[h]
         "clean_data" : True,
-        "limit_slices" : False,
-        "limit_window": 5
+        "limit_slices" : True,
+        "limit_window": 10
     },
     "train": {
         "batch_size": 64,

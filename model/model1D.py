@@ -91,16 +91,17 @@ class UpsamplingBlock(Layer):
 class Unet(tf.keras.Model):
     """
     Unet model"""
-    def __init__(self,n_classes,num_blocks=5, n_filters=32):
+    def __init__(self,n_classes,num_blocks=2, n_filters=32):
         super().__init__()
         self.downsampling_blocks  = []
         self._n_filters = n_filters
         for i in range(num_blocks):
-            if i ==3:
-                self.downsampling_blocks.append(DownsamplingBlock(self._n_filters,dropout_prob=0.3) )    
-                self._n_filters *= 2
-            elif i==4:
-                self.downsampling_blocks.append(DownsamplingBlock(self._n_filters,dropout_prob=0.3,max_pooling=False) )    
+            # if i ==3:
+            #     self.downsampling_blocks.append(DownsamplingBlock(self._n_filters,dropout_prob=0.5) )    
+            #     self._n_filters *= 2
+            if i ==1:
+            #elif i==4:
+                self.downsampling_blocks.append(DownsamplingBlock(self._n_filters,dropout_prob=0.5,max_pooling=False) )    
                 self._n_filters /=2
             else:
                 self.downsampling_blocks.append(DownsamplingBlock(self._n_filters) )

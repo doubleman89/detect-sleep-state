@@ -62,7 +62,7 @@ class Serie:
                     pass
 
 
-    def _pad_to(self,x, step_window):
+    def _pad_to(self,x, step_window, padding = 'center'):
         """
         x - data which requires padding
         step_window - amount of steps to which "x" has to be padded"""
@@ -70,36 +70,59 @@ class Serie:
         pads = (step_window - h)//2
         shape = (*Ni,step_window,w)
         out = np.zeros(shape=shape)
-        if len(Ni) == 0:
-            out[pads:(step_window-pads)] = x
-        else:
-            for ii in np.ndindex(Ni):
-                x_j = 0
-                for jj in range(pads,(step_window-5)):
-                    out_j = (jj,)
-                    out[ii+out_j] = x[ii+(x_j,)]
-                    x_j+=1
-            #out[Ni,pads:(final_length-5)] = x
+        if padding == 'center':
+            if len(Ni) == 0:
+                out[pads:(step_window-pads)] = x
+            else:
+                for ii in np.ndindex(Ni):
+                    x_j = 0
+                    for jj in range(pads,(step_window-pads)):
+                        out_j = (jj,)
+                        out[ii+out_j] = x[ii+(x_j,)]
+                        x_j+=1
+                #out[Ni,pads:(final_length-5)] = x
+        elif padding == "end":
+            if len(Ni) == 0:
+                out[:(step_window-2*pads)] = x
+            else:
+                for ii in np.ndindex(Ni):
+                    x_j = 0
+                    for jj in range(0,(step_window-2*pads)):
+                        out_j = (jj,)
+                        out[ii+out_j] = x[ii+(x_j,)]
+                        x_j+=1
+                #out[Ni,pads:(final_length-5)] = x
         return out, pads
 
-    def _unpad(self,x, pad):
+    def _unpad(self,x, pad, padding = 'center'):
         """
         x - data which requires unpadding
         pad - amount of pads from every side of data (at the beginning and at the end)
         """
         Ni, h,w = x.shape[:-2], x.shape[-2],x.shape[-1]
-    
-        if len(Ni) == 0:
-            return x[pad:(h-pad)]
-        else:
-            shape = (*Ni,h-pad*2,w)
-            out = np.zeros(shape=shape)
-            for ii in np.ndindex(Ni):
-                out_j= 0 
-                for jj in range(pad,(x.shape[-2]-pad)):
-                    out[ii+(out_j,)]= x[ii+(jj,)]
-                    out_j +=1
-            return out
+        if padding == 'center':
+            if len(Ni) == 0:
+                return x[pad:(h-pad)]
+            else:
+                shape = (*Ni,h-pad*2,w)
+                out = np.zeros(shape=shape)
+                for ii in np.ndindex(Ni):
+                    out_j= 0 
+                    for jj in range(pad,(x.shape[-2]-pad)):
+                        out[ii+(out_j,)]= x[ii+(jj,)]
+                        out_j +=1
+        elif padding == 'end':
+            if len(Ni) == 0:
+                return x[:(h-2*pad)]
+            else:
+                shape = (*Ni,h-pad*2,w)
+                out = np.zeros(shape=shape)
+                for ii in np.ndindex(Ni):
+                    out_j= 0 
+                    for jj in range(0,(x.shape[-2]-2*pad)):
+                        out[ii+(out_j,)]= x[ii+(jj,)]
+                        out_j +=1
+        return out
 
     def _detect_change(self, slice):
         for val in self.__class__.encode_list.values():
@@ -108,7 +131,7 @@ class Serie:
         return True
         
 
-    def create_slices(self, step_window, drop_columns,serie,limit_slices = False, limit_window = 10):
+    def create_slices(self, step_window, drop_columns,serie,limit_slices = False, limit_window = 10 , padding = 'end'):
         """ create slices from the serie 
         step_window - defines how many steps contains every slice
         drop_columns - columns to be dropped 
@@ -120,7 +143,7 @@ class Serie:
             # calculate slice lenght 
             data = serie.drop(columns =drop_columns)
             slices = np.expand_dims(data,axis =0)
-            slices, self.slice_pads = self._pad_to(slices,step_window)
+            slices, self.slice_pads = self._pad_to(slices,step_window,padding=padding)
 
         else:    
             # calculate slice columns after dropping
@@ -148,12 +171,16 @@ class Serie:
                     else:
                         new_slices = np.concatenate((new_slices[1:limit_window+1],new_slice),axis = 0)
 
-                    slice_pos = slice_pos - 1 
+                    if limit_window > 1:                    
+                        slice_pos = slice_pos - 1 
                     
                     # update position if slice is with an event change 
                     if self._detect_change(new_slice):
                         # set random position for slice with detected change
-                        slice_expected_pos = np.random.randint(0,limit_window-1)
+                        if limit_window > 1:                    
+                            slice_expected_pos = np.random.randint(0,limit_window-1)
+                        else:
+                            slice_expected_pos = slice_pos                                             
                         wait_for_position =True
                         slice_pos = new_slices.shape[0]
 
@@ -175,7 +202,7 @@ class Serie:
         self.slices = slices
 
     @staticmethod
-    def create_events(serie,y_pred :np.array):
+    def create_events(serie,y_pred :np.array, padding = "end"):
         """create df_events 
         input:
         y_pred - score  (predicited vaues )"""
@@ -191,7 +218,7 @@ class Serie:
         if serie.slice_pads is None:
             y_pred_unpadded = y_pred
         else:
-            y_pred_unpadded = serie._unpad(y_pred,serie.slice_pads)
+            y_pred_unpadded = serie._unpad(y_pred,serie.slice_pads,padding = padding)
         # create step seg list
         #         - events - segmentation mask
         #         -  score   - predicited vaues for chosen event
@@ -202,6 +229,9 @@ class Serie:
         for slices_num in range(events.shape[0]):
             slice = events[slices_num]
             score = scores[slices_num]
+            # flags for filtering only one event per slice
+            event_detected = False
+            highest_score,event_score = -1.0 , -1.0
             for i in range(events.shape[1]):
                 event_val = slice[i][0]
                 event_score = score[i][0]
@@ -209,15 +239,23 @@ class Serie:
                 if i == 0:
                     # do not detect anything during first step
                     continue
-                elif not detectChange(slice[i-1],event_val):
+                elif not detectChange(slice[i-1][0],event_val):
                     continue
-
-                df_events.loc[len(df_events.index)] = [serie.serie_id,slices_num*i+i,event_val,event_score]
+                event_detected = True
+                # if detected event in slice is not the first or below the highest - continue 
+                if event_score <highest_score and highest_score != -1.0:
+                    continue
+                index = i 
+                event = event_val
+                highest_score = event_score
+            
+            if event_detected:
+                df_events.loc[len(df_events.index)] = [serie.serie_id,slices_num*index+index,event,highest_score]
 
         # decode events 
         df_events = serie.decode_events(df_events)
         # save as serie events 
-        return df_events 
+        return df_events ,y_pred_unpadded
 
     
     def get_example(self):
@@ -368,8 +406,8 @@ class TestSerie(Serie):
         super().create_slices(time_window,drop_columns,self.serie)
 
     def create_events(self, y_pred: np.array):
-        self.serie_events = Serie.create_events(self,y_pred)
-        return self.serie_events 
+        self.serie_events, raw_prediction = Serie.create_events(self,y_pred)
+        return self.serie_events , raw_prediction
     
     def get_correct_slices(self):
 
@@ -451,8 +489,8 @@ class Train_Series(Series):
 
     def create_events(self, y_pred: np.array):
         """creates events for specific series data"""
-        serie_events = Serie.create_events(self,y_pred)
-        return serie_events 
+        serie_events, raw_prediction = Serie.create_events(self,y_pred)
+        return serie_events , raw_prediction
 
 class Test_Series(Series):
     def __init__(self,data,paths):
