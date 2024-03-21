@@ -1,2 +1,2 @@
-model_checkpoint_path: "cp-0100_2023-11-10.ckpt"
-all_model_checkpoint_paths: "cp-0100_2023-11-10.ckpt"
+model_checkpoint_path: "cp-lstm_1x32_lr_0.0158_v2-0030_2023-12-03.ckpt"
+all_model_checkpoint_paths: "cp-lstm_1x32_lr_0.0158_v2-0030_2023-12-03.ckpt"

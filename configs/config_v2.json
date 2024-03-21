@@ -1,0 +1,30 @@
+{
+    "IS_DEBUG": 
+        "True",
+    "train_path": 
+        "dataloader/datasets/data_raw//train_series.parquet",
+    "train_target_path": 
+        "dataloader/datasets/data_raw/train_events.csv",
+    "test_path": 
+        "dataloader/datasets/data_raw/test_series.parquet",
+    "sample_submission_path": 
+        "dataloader/datasets/data_raw/sample_submission.csv",
+    "preprocess_dir": 
+        "dataloader/datasets/v2/",
+    "weight_dir_1dcnn": 
+        "model/weights_v2/",
+    "weight_dir_lgbm": 
+        "model/lgbm_models_v2/",
+    "inputs_2nd":
+        "dataloader/datasets/v2/df_second_model.feather",
+    "steps_per_sec": 
+        0.2,
+    "step_for_1min": 
+        12.0,
+    "step_for_15min": 
+        180.0,
+    "step_for_30min": 
+        360.0,
+    "step_for_a_day": 
+        17280.0
+}

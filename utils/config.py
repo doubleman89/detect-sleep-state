@@ -28,7 +28,8 @@ class SingletonMeta(type):
         return cls._instances[cls]
 
 @dataclass
-class Paths(metaclass=SingletonMeta):
+#class Paths(metaclass=SingletonMeta):
+class Paths():
     """converts paths to pathlib paths"""
    
     def __init__(self,paths):
