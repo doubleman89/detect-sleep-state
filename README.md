@@ -6,5 +6,8 @@ Project based on dataset from competition - https://www.kaggle.com/competitions/
 - [x] 2. Train events data were changed into segmenatation mask (0 - awake/wakeup, 1 - onset/sleep) which was included with train series.
 - [x] 3. If sleep event in train event was not recognized - segmentation mask is assumed as unkonwn (-1) which will be ignored during training
 - [x] 4. First idea is to use U-net model with Conv1D. First learnings made 
-- [ ] 5. Train output mask needs to be converted into events 
-- [ ] 6. Error analysis, fine tuning etc. 
+- [x] 5. Train output mask needs to be converted into events
+- [x] 6. Adding new features (positional encoding, serie converted to one day - paddding with 0 for smaller time series) 
+- [x] 7. Update of the U-net model with multi class outputs
+- [ ] 8. Check changes, error analysis
+- [ ] 9. Further exploration of possible solutions (Transformer architecture?) 
