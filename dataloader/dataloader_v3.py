@@ -147,6 +147,51 @@ class Serie:
             return f
         
         return timestamp.apply(get_daily_step(self.serie))
+    
+    def correct_daily_steps(self,daily_steps):
+        """
+        must be applied, because there could be a time change in time steps 
+        """
+        length = daily_steps.shape[0]
+        max_val = self.daily_steps_total-1 
+        prev_val = None
+        index_with_wrong_value = -1
+        for i in range(length):
+            
+            if i == 0 :
+                prev_val = daily_steps[i]
+                continue
+            else: 
+                prev_val = daily_steps[i-1]
+            
+            if (prev_val+1 == daily_steps[i]) or (prev_val == max_val and daily_steps[i] == 0):
+                continue
+            
+            index_with_wrong_value = i
+            break
+
+        if index_with_wrong_value  >= 0:
+            first_index_full = max_val - prev_val + index_with_wrong_value
+
+            # fill not complete range first
+            if first_index_full < length:
+                daily_steps[index_with_wrong_value:first_index_full] = np.arange(prev_val+1,self.daily_steps_total)
+            else:
+                daily_steps[index_with_wrong_value:length] = np.arange(prev_val+1,prev_val+1+length-index_with_wrong_value)
+            # fill complete ranges: 
+            complete_ranges_no = (length - first_index_full)// self.daily_steps_total 
+            if complete_ranges_no > 0:
+                for i in range (complete_ranges_no):
+                    daily_steps[first_index_full+i*self.daily_steps_total:first_index_full+(i+1)*self.daily_steps_total] = np.arange(0,self.daily_steps_total)
+            # fill right part with non complete range
+            start = first_index_full+complete_ranges_no*self.daily_steps_total
+            daily_steps[start:length] = np.arange(0,length-start)
+        
+        return daily_steps
+        
+
+
+
 
     def feature_engineering(self,**kwargs):
         def serie_moving_average(serie,average_val=[10,5]):
@@ -175,7 +220,7 @@ class Serie:
             raise ValueError("moving average gradient samples not found")
 
         
-        self.serie['daily_step'] = self.get_daily_step_from_timestamp(self.serie['timestamp'])
+        self.serie['daily_step'] = self.correct_daily_steps(self.get_daily_step_from_timestamp(self.serie['timestamp']))
 
         serie_anglez  = self.serie[["anglez"]].to_numpy()
         serie_enmo  = self.serie[["enmo"]].to_numpy()
@@ -288,7 +333,7 @@ class Serie:
 
             # declare left and right padding values
             left_pad = int(ds_serie[start])
-            print(max_val,ds_serie[stop])
+            # print(max_val,ds_serie[stop])
             right_pad = max_val -ds_serie[stop]
             self.valid_ranges_padding.append([left_pad,right_pad])
             # drop not necessary columns and get a range
@@ -507,6 +552,8 @@ class TrainSerie(Serie):
         step_seg_list = np.full(shape =(self.serie_length,),fill_value=encoded_list["unknown"],dtype= np.int64)
         step_multi_seg_list_wakeup = np.full(shape =(self.serie_length,),fill_value=0,dtype= np.int64)
         step_multi_seg_list_onset = np.full(shape =(self.serie_length,),fill_value=0,dtype= np.int64)
+           
+        
         last_step =  -1
         last_timestamp_na = False
         last_event = -1
@@ -589,11 +636,19 @@ class TrainSerie(Serie):
             valid_ranges_table.append([last_min_valid_step,max_range])
         self.valid_ranges_table = valid_ranges_table
 
+
+
         # create mask
         self.mask = self.serie
         self.mask["event"] = step_seg_list
         self.mask["event_multi_wakeup"] = step_multi_seg_list_wakeup
         self.mask["event_multi_awake"] = step_multi_seg_list_onset
+        # # create multi class binary targets for top5 
+        # for i in range(1,6):
+        #     key1 = "event_multi_wakeup_top" + str(i)
+        #     key2 = "event_multi_awake_top" + str(i)
+        #     self.mask[key1] = np.where(step_multi_seg_list_wakeup >= TrainSerie.multiclass_label_list[str(i)] )
+        #     self.mask[key2] = np.where(step_multi_seg_list_onset >= TrainSerie.multiclass_label_list[str(i)] )
 
     def create_slices(self, unknown_columns =['event'],drop_columns = ['daily_step','step','timestamp']):
         super().create_slices(self.mask,unknown_columns=unknown_columns, drop_columns=drop_columns)
@@ -775,7 +830,7 @@ class Dataset:
         self.daily_steps_total = daily_steps_total
         self.pos_enc_one_interval = self._positional_encoding_single(self.daily_steps_total,1)
 
-        self.ds, x, self.slices_ids = self._create_dataset_from_slices(train_series)
+        self.ds_train, x, self.slices_ids = self._create_dataset_from_slices(train_series)
         self.train_days = f(x,daily_steps_total)
         self.ds_test, x, self.test_slices_ids = self._create_dataset_from_slices(test_series)
         self.test_days = f(x,daily_steps_total)
@@ -783,7 +838,7 @@ class Dataset:
         self.positional_encoding = positional_encoding
 
         # for windowed datasets     
-        self.train = self.ds.copy()
+        self.train = self.ds_train.copy()
         self.test = self.ds_test.copy()
   
         self.mean = None
@@ -838,15 +893,20 @@ class Dataset:
 
     def _positional_encoding_repeats(self, full_repeats : int):
         for i in range(full_repeats):
-            rep_pos_enc = np.append(self.pos_enc_one_interval,self.pos_enc_one_interval,axis = 0)
+            if i == 0:
+                rep_pos_enc = self.pos_enc_one_interval
+            else:
+                rep_pos_enc = np.append(rep_pos_enc,self.pos_enc_one_interval,axis = 0)
         return rep_pos_enc
     
     def add_positional_encoding(self):
         train_pos_enc = self._positional_encoding_repeats(self.train_days)
-        self.ds = np.insert(self.ds,np.arange(self.train_days),train_pos_enc,axis = -1)
+        # self.ds = np.insert(self.ds,np.arange(train_pos_enc.shape[0]),train_pos_enc,axis = 0)
+        self.train = np.column_stack((train_pos_enc,self.ds_train))
 
         test_pos_enc = self._positional_encoding_repeats(self.test_days)
-        self.ds = np.insert(self.ds,np.arange(self.test_days),test_pos_enc,axis = -1)
+        # self.ds_test = np.insert(self.ds_test,np.arange(test_pos_enc.shape[0]),test_pos_enc,axis = 0)
+        self.test = np.column_stack((test_pos_enc,self.ds_test))
 
 
     def _create_dataset_from_slices(self,series : Series, ):
@@ -865,7 +925,7 @@ class Dataset:
                     old_shape = ds_from_slices.shape[0]
                     ds_from_slices = np.concatenate((ds_from_slices,ms),axis = 0)
                     slices_ids.append(((old_shape,ds_from_slices.shape[0]-1),serie_id))
-                    print(ds_from_slices.shape, ms.shape,  ds_from_slices.shape[0]/self.daily_steps_total)
+                    # print(ds_from_slices.shape, ms.shape,  ds_from_slices.shape[0]/self.daily_steps_total)
                 except ms.shape[0] % self.daily_steps_total != 0:
                     print(serie_id)
         
@@ -878,12 +938,10 @@ class Dataset:
         self.train[...,:self.outputs_no] = self._fit_transform(self.train[...,:self.outputs_no])
         self.test = self._transform(self.test)
 
-    def get_windowed_trainset(self,stride,batch_size,shuffle_buffer):
-        window_size = self.train.shape[1]
+    def get_windowed_trainset(self,window_size, batch_size,shuffle_buffer):
         return Dataset.windowed_dataset(self.train,window_size=window_size,batch_size=batch_size,shuffle_buffer=shuffle_buffer, outputs_no = self.outputs_no)
 
-    def get_windowed_testset(self,batch_size):
-        window_size = self.test.shape[1]
+    def get_windowed_testset(self,window_size,batch_size):
         return Dataset.windowed_testset(self.test,window_size,batch_size)
 
     @staticmethod            
@@ -900,8 +958,8 @@ class Dataset:
         Returns:
         dataset (TF Dataset) - TF Dataset containing time windows
         """
-        num_classes = np.max(series[:,:,-1])+1
-        multi_class_range = np.max(series[:,:,-2]+1)
+        num_classes = np.max(series[:,-1])+1
+        multi_class_range = np.max(series[:,-2]+1)
         dataset = series.reshape(-1,series.shape[-1])
         # Generate a TF Dataset from the series values
         dataset = tf.data.Dataset.from_tensor_slices(dataset)
@@ -910,14 +968,15 @@ class Dataset:
         dataset = dataset.window(window_size, shift=window_size, drop_remainder=drop_remainder)
         
         # Flatten the windows by putting its elements in a single batch
-        dataset = dataset.flat_map(lambda window: window.batch(window_size+1))
+        dataset = dataset.flat_map(lambda window: window.batch(window_size))
 
         #
         # Create tuples with features and labels 
         dataset = dataset.map(lambda window: (window[:,:outputs_no], 
                                               tf.one_hot(tf.dtypes.cast(window[:,-3],tf.int8),depth=multi_class_range),
                                               tf.one_hot(tf.dtypes.cast(window[:,-2],tf.int8),depth=multi_class_range), 
-                                              tf.one_hot(tf.dtypes.cast(window[:,-1],tf.int8),depth=num_classes)))
+                                              tf.one_hot(tf.dtypes.cast(window[:,-1],tf.int8),depth=num_classes)
+                                              ))
 
         # Shuffle the windows
         dataset = dataset.shuffle(shuffle_buffer)
